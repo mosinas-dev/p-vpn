@@ -1,0 +1,97 @@
+services:
+  amnezia-portal-app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: amnezia-portal-app
+    restart: unless-stopped
+    working_dir: /var/www
+    environment:
+      DB_HOST: amnezia-portal-db
+      DB_PORT: 3306
+      DB_DATABASE: amnezia_portal
+      DB_USERNAME: portal
+      DB_PASSWORD: portal
+      MAIL_HOST: amnezia-portal-mailhog
+      MAIL_PORT: 1025
+      MAIL_FROM_ADDRESS: noreply@portal.local
+      QUEUE_CONNECTION: database
+      PANEL_BASE_URL: http://amnezia-panel-web
+      RUN_MIGRATIONS: "1"
+    volumes:
+      - ./:/var/www
+    depends_on:
+      amnezia-portal-db:
+        condition: service_healthy
+
+  amnezia-portal-nginx:
+    image: nginx:1.27-alpine
+    container_name: amnezia-portal-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./:/var/www:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - amnezia-portal-app
+
+  amnezia-portal-queue:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: amnezia-portal-queue
+    restart: unless-stopped
+    working_dir: /var/www
+    environment:
+      DB_HOST: amnezia-portal-db
+      DB_PORT: 3306
+      DB_DATABASE: amnezia_portal
+      DB_USERNAME: portal
+      DB_PASSWORD: portal
+      MAIL_HOST: amnezia-portal-mailhog
+      MAIL_PORT: 1025
+      QUEUE_CONNECTION: database
+      PANEL_BASE_URL: http://amnezia-panel-web
+      WAIT_FOR_MIGRATIONS: "1"
+    volumes:
+      - ./:/var/www
+    depends_on:
+      amnezia-portal-db:
+        condition: service_healthy
+    command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+
+  amnezia-portal-db:
+    image: mysql:8.0
+    container_name: amnezia-portal-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: amnezia_portal
+      MYSQL_USER: portal
+      MYSQL_PASSWORD: portal
+    ports:
+      - "3308:3306"
+    volumes:
+      - amnezia-portal-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uportal", "-pportal"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  amnezia-portal-mailhog:
+    image: mailhog/mailhog:latest
+    container_name: amnezia-portal-mailhog
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
+volumes:
+  amnezia-portal-db-data:
